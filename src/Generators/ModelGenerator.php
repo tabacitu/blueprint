@@ -3,6 +3,7 @@
 namespace Blueprint\Generators;
 
 use Blueprint\Blueprint;
+use Blueprint\Classname;
 use Blueprint\Contracts\Generator;
 use Blueprint\Models\Column;
 use Blueprint\Models\Model;
@@ -191,51 +192,7 @@ class ModelGenerator implements Generator
         foreach ($model->relationships() as $type => $references) {
             foreach ($references as $reference) {
                 $custom_template = $template;
-                $key = null;
-                $class = null;
-
-                $column_name = $reference;
-                $method_name = Str::beforeLast($reference, '_id');
-
-                if (Str::contains($reference, ':')) {
-                    [$foreign_reference, $column_name] = explode(':', $reference);
-                    $method_name = Str::beforeLast($column_name, '_id');
-
-                    if (Str::contains($foreign_reference, '.')) {
-                        [$class, $key] = explode('.', $foreign_reference);
-
-                        if ($key === 'id') {
-                            $key = null;
-                        } else {
-                            $method_name = Str::lower($class);
-                        }
-                    } else {
-                        $class = $foreign_reference;
-                    }
-                }
-
-                $class_name = Str::studly($class ?? $method_name);
-                $fqcn = $this->fullyQualifyModelReference($class_name) ?? $model->fullyQualifiedNamespace() . '\\' . $class_name;
-
-                if ($type === 'morphTo') {
-                    $relationship = sprintf('$this->%s()', $type);
-                } elseif ($type === 'morphMany' || $type === 'morphOne') {
-                    $relation = Str::lower(Str::singular($column_name)) . 'able';
-                    $relationship = sprintf('$this->%s(%s::class, \'%s\')', $type, '\\' . $fqcn, $relation);
-                } elseif (!is_null($key)) {
-                    $relationship = sprintf('$this->%s(%s::class, \'%s\', \'%s\')', $type, '\\' . $fqcn, $column_name, $key);
-                } elseif (!is_null($class) && $type === 'belongsToMany') {
-                    $relationship = sprintf('$this->%s(%s::class, \'%s\')', $type, '\\' . $fqcn, $column_name);
-                    $column_name = $class;
-                } else {
-                    $relationship = sprintf('$this->%s(%s::class)', $type, '\\' . $fqcn);
-                }
-
-                if ($type === 'morphTo') {
-                    $method_name = Str::lower($class_name);
-                } elseif (in_array($type, ['hasMany', 'belongsToMany', 'morphMany'])) {
-                    $method_name = Str::plural($column_name);
-                }
+                [$method_name, $relationship] = (new Classname($reference))->toRelationshipCode($type, $this->tree, $model);
 
                 if (Blueprint::supportsReturnTypeHits()) {
                     $custom_template = str_replace(
@@ -413,21 +370,5 @@ class ModelGenerator implements Generator
         ];
 
         return $php_data_types[strtolower($dataType)] ?? 'string';
-    }
-
-    private function fullyQualifyModelReference(string $model_name)
-    {
-        // TODO: get model_name from tree.
-        // If not found, assume parallel namespace as controller.
-        // Use respond-statement.php as test case.
-
-        /** @var \Blueprint\Models\Model $model */
-        $model = $this->tree->modelForContext($model_name);
-
-        if (isset($model)) {
-            return $model->fullyQualifiedClassName();
-        }
-
-        return null;
     }
 }
